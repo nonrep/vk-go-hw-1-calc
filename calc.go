@@ -11,7 +11,7 @@ import (
 )
 
 // Выполнение арифметической операции
-func operation(left, right int, operation rune) (result int, err error) {
+func operation(left, right float64, operation rune) (result float64, err error) {
 	switch operation {
 	case '+':
 		result = left + right
@@ -48,22 +48,38 @@ func shiftSlice[T any](slice []T, index int, skip int) ([]T, error) {
 }
 
 func calc(formula string, output io.Writer) (err error) {
-	matched, err := regexp.MatchString(`^[\d\s+\-*/()]+$`, formula)
+	matched, err := regexp.MatchString(`^[\d\s+\-*/().]+$`, formula)
 	if err != nil {
 		return err
 	}
 	if !matched {
 		return errors.New("invalid characters")
 	}
-	numberScanner := regexp.MustCompile(`\d+`)
+
+	// добавление поддержки унарного минуса путем добавления перед ним нуля
+	var prev rune
+	for i := range formula {
+		if formula[i] == '-' && (prev == 0 || (prev >= 0 && prev <= 9) || prev == '(') {
+			formula = formula[:i] + "0" + formula[i:]
+			i++
+		}
+		if formula[i] != ' ' {
+			prev = rune(formula[i])
+		}
+	}
+
+	numberScanner := regexp.MustCompile(`\d+(\.\d+)?`)
 	tokens := numberScanner.ReplaceAllString(formula, "N") // замена чисел на токен N для удобства обработки строки токенов
+	if strings.Contains(tokens, ".") {
+		return errors.New("the formula contains an invalid combination")
+	}
 	n := strings.Count(tokens, "N")
 	stringNumbers := numberScanner.FindAllString(formula, n)
 	tokens = strings.ReplaceAll(tokens, " ", "")
-	var numbers []int // хранит все числа выражения чтобы сопоставить их с токенами чисел
-	var number int
+	var numbers []float64 // хранит все числа выражения чтобы сопоставить их с токенами чисел
+	var number float64
 	for _, string := range stringNumbers {
-		number, err = strconv.Atoi(string)
+		number, err = strconv.ParseFloat(string, 64)
 		if err != nil {
 			return err
 		}
