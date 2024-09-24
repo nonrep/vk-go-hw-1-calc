@@ -2,13 +2,24 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"io"
-	"os"
-	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"github.com/nonrep/go-homework-1-calc/stack"
 )
+
+type IStack[T any] interface {
+	Push(elem T)
+	Pop() (T, bool)
+	Peek() (T, bool)
+	IsEmpty() bool
+	Size() int
+}
+
+func NewStack[T any]() IStack[T] {
+	return &stack.Stack[T]{}
+}
 
 // Выполнение арифметической операции
 func operation(left, right float64, operation rune) (result float64, err error) {
@@ -25,71 +36,74 @@ func operation(left, right float64, operation rune) (result float64, err error) 
 		}
 		result = left / right
 	}
-
 	return result, nil
 }
 
-// Для сдвига слайса после выполнения арифметической операций
-// index - перед каким элементом начать сдвиг
-// skip - сколько элементов удалить перед index
-func shiftSlice[T any](slice []T, index int, skip int) ([]T, error) {
-	if index < 0 || index >= len(slice) {
-		return slice, errors.New("index out of range")
+func isValidFormula(formula string) error {
+	validRunes := "0123456789 +-*/()."
+	for _, rune := range formula {
+		if !(strings.ContainsRune(validRunes, rune)) {
+			return errors.New("formula is invalid")
+		}
 	}
-	indexWithSkip := index - skip
-	if indexWithSkip < 0 {
-		return slice, errors.New("index after skip is out of range")
-	}
-	result := make([]T, 0, len(slice)-skip)
-	result = append(result, slice[:indexWithSkip]...)
-	result = append(result, slice[index:]...)
-
-	return result, nil
+	return nil
 }
 
-func calc(formula string, output io.Writer) (err error) {
-	matched, err := regexp.MatchString(`^[\d\s+\-*/().]+$`, formula)
-	if err != nil {
-		return err
-	}
-	if !matched {
-		return errors.New("invalid characters")
-	}
-
-	// добавление поддержки унарного минуса путем добавления перед ним нуля
+func addUnaryMinus(formula string) string {
 	var prev rune
-	for i := range formula {
-		if formula[i] == '-' && (prev == 0 || (prev >= 0 && prev <= 9) || prev == '(') {
-			formula = formula[:i] + "0" + formula[i:]
-			i++
+	for i, char := range formula {
+		if char == '-' && (prev == 0 || prev == ' ' || prev == '(') {
+			formula = formula[:i] + "0" + formula[i:] // добавляем 0 перед унарным минусом
 		}
-		if formula[i] != ' ' {
-			prev = rune(formula[i])
+		if char != ' ' {
+			prev = char
 		}
 	}
+	return formula
+}
 
-	numberScanner := regexp.MustCompile(`\d+(\.\d+)?`)
-	tokens := numberScanner.ReplaceAllString(formula, "N") // замена чисел на токен N для удобства обработки строки токенов
-	if strings.Contains(tokens, ".") {
-		return errors.New("the formula contains an invalid combination")
-	}
-	n := strings.Count(tokens, "N")
-	stringNumbers := numberScanner.FindAllString(formula, n)
-	tokens = strings.ReplaceAll(tokens, " ", "")
-	var numbers []float64 // хранит все числа выражения чтобы сопоставить их с токенами чисел
-	var number float64
-	for _, string := range stringNumbers {
-		number, err = strconv.ParseFloat(string, 64)
-		if err != nil {
-			return err
+func tokenize(formula string) (tokens []rune, numbers []float64, err error) {
+	var numberString string
+
+	for i := 0; i < len(formula); i++ {
+		char := rune(formula[i])
+
+		if unicode.IsDigit(char) || char == '.' {
+			numberString += string(char)
+		} else {
+			if numberString != "" {
+				number, err := strconv.ParseFloat(numberString, 64)
+				if err != nil {
+					return nil, nil, errors.New("invalid number format")
+				}
+				tokens = append(tokens, 'N')
+				numbers = append(numbers, number)
+				numberString = ""
+			}
+
+			if char == '+' || char == '-' || char == '*' || char == '/' || char == '(' || char == ')' {
+				tokens = append(tokens, char)
+			}
 		}
+	}
+	if numberString != "" {
+		number, err := strconv.ParseFloat(numberString, 64)
+		if err != nil {
+			return nil, nil, errors.New("invalid number format")
+		}
+		tokens = append(tokens, 'N')
 		numbers = append(numbers, number)
 	}
-	if strings.Contains(tokens, "NN") {
-		return errors.New("the formula contains an invalid combination")
+
+	if len(tokens) == 0 {
+		return nil, nil, errors.New("the formula is empty or invalid")
 	}
 
-	// определение приоритета операций с помощью обратной польской записи
+	return tokens, numbers, nil
+}
+
+// определение приоритета операций с помощью обратной польской записи
+func infixToPostfix(tokens []rune) ([]rune, error) {
 	priority := map[rune]int{
 		'(': 0,
 		')': 1,
@@ -98,89 +112,118 @@ func calc(formula string, output io.Writer) (err error) {
 		'/': 8,
 		'*': 8,
 	}
+
+	// в infix записи между операндами должен быть оператор
+	if strings.Contains(string(tokens), "NN") {
+		return []rune{}, errors.New("the formula contains an invalid combination")
+	}
+
 	var polishEntry []rune
-	var stack []rune
+
+	stack := NewStack[rune]()
+
 	for _, token := range tokens {
-		if token == 'N' {
+		if token == 'N' { // Если токен - это число (предположим N)
 			polishEntry = append(polishEntry, token)
 		} else if token == '(' {
-			stack = append(stack, token)
+			stack.Push(token)
 		} else if token == ')' {
-			if len(stack) == 0 {
-				return errors.New("wrong combination of brackets")
+			if stack.IsEmpty() {
+				return nil, errors.New("wrong combination of brackets")
 			}
-			for stack[len(stack)-1] != '(' {
-				polishEntry = append(polishEntry, stack[len(stack)-1])
-				stack = stack[:len(stack)-1]
+			for {
+				top, exists := stack.Peek()
+				if !exists {
+					return nil, errors.New("wrong combination of brackets")
+				}
+				if top == '(' {
+					stack.Pop()
+					break
+				}
+				last, _ := stack.Pop()
+				polishEntry = append(polishEntry, last)
 			}
-			stack = stack[:len(stack)-1]
 		} else {
-			for len(stack) > 0 && priority[stack[len(stack)-1]] >= priority[token] {
-				polishEntry = append(polishEntry, stack[len(stack)-1])
-				stack = stack[:len(stack)-1]
+			for !stack.IsEmpty() {
+				top, exists := stack.Peek()
+				if !exists {
+					break
+				}
+				if priority[top] >= priority[token] {
+					last, _ := stack.Pop()
+					polishEntry = append(polishEntry, last)
+				} else {
+					break
+				}
 			}
-			stack = append(stack, token)
+			stack.Push(token)
 		}
 	}
-	for len(stack) != 0 {
-		if stack[len(stack)-1] == '(' {
-			return errors.New("wrong combination of brackets")
+
+	for !stack.IsEmpty() {
+		last, _ := stack.Pop()
+		if last == '(' {
+			return nil, errors.New("wrong combination of brackets")
 		}
-		polishEntry = append(polishEntry, stack[len(stack)-1])
-		stack = stack[:len(stack)-1]
+		polishEntry = append(polishEntry, last)
 	}
+
 	if len(polishEntry) == 0 {
-		return errors.New("the formula contains an invalid combination")
+		return nil, errors.New("the formula contains an invalid combination")
 	}
 
-	// преобразование обратной польской записи в выражение
-	// i - итератор polishEntry
-	// num - итератор numbers
-	var i int
-	num := -1
-	result := numbers[0] // если формула состоит из одного числа
-	for len(polishEntry) != 1 {
-		if polishEntry[i] == 'N' {
-			i++
-			num++
-			if i > len(polishEntry)-1 {
-				return errors.New("the formula contains an invalid combination")
-			}
-			continue
-		} else {
-			if i-2 >= 0 && num-1 >= 0 {
-				result, err = operation(numbers[num-1], numbers[num], polishEntry[i])
-				if err != nil {
-					return err
-				}
-				numbers[num] = result
-				polishEntry[i] = 'N'
-				numbers, err = shiftSlice(numbers, num, 1)
-				if err != nil {
-					return err
-				}
-				polishEntry, err = shiftSlice(polishEntry, i, 2)
-				if err != nil {
-					return err
-				}
-				num -= 1
-				i -= 1
-			} else {
-				return errors.New("the formula contains an invalid combination")
-			}
-		}
-	}
-
-	fmt.Fprintln(output, result)
-
-	return nil
+	return polishEntry, nil
 }
 
-func main() {
-	formula := os.Args[1]
-	err := calc(formula, os.Stdout)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+func calculatePostfix(polishEntry []rune, numbers []float64) (float64, error) {
+	var stack []float64
+	numIndex := 0
+
+	for _, token := range polishEntry {
+		if token == 'N' {
+			if numIndex >= len(numbers) {
+				return 0, errors.New("invalid expression: not enough numbers")
+			}
+			stack = append(stack, numbers[numIndex])
+			numIndex++
+		} else {
+			if len(stack) < 2 {
+				return 0, errors.New("invalid expression: not enough values in stack")
+			}
+			right := stack[len(stack)-1]
+			left := stack[len(stack)-2]
+			stack = stack[:len(stack)-2]
+
+			result, err := operation(left, right, token)
+			if err != nil {
+				return 0, err
+			}
+			stack = append(stack, result)
+		}
 	}
+
+	if len(stack) != 1 {
+		return 0, errors.New("invalid expression: multiple values left in stack")
+	}
+
+	return stack[0], nil
+}
+
+func Calc(formula string) (float64, error) {
+	if err := isValidFormula(formula); err != nil {
+		return 0, err
+	}
+	formula = addUnaryMinus(formula)
+
+	tokens, numbers, err := tokenize(formula)
+	if err != nil {
+		return 0, err
+	}
+
+	polishEntry, err := infixToPostfix(tokens)
+	if err != nil {
+		return 0, err
+	}
+
+	return calculatePostfix(polishEntry, numbers)
 }

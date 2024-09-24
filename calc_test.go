@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"strconv"
-	"strings"
+	"fmt"
 	"testing"
 )
 
 func TestOK(t *testing.T) {
-	out := bytes.NewBuffer(nil)
 	var tests = []struct {
 		formula string
 		expect  float64
@@ -32,12 +29,7 @@ func TestOK(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		err := calc(test.formula, out)
-		if err != nil {
-			t.Errorf("Testing OK failed: %s", err)
-		}
-		data := strings.TrimSpace(out.String())
-		result, err := strconv.ParseFloat(data, 64)
+		result, err := Calc(test.formula)
 		if err != nil {
 			t.Errorf("Testing OK failed: %s", err)
 		}
@@ -45,12 +37,10 @@ func TestOK(t *testing.T) {
 		if result != test.expect {
 			t.Error("Testing OK failed, result not match")
 		}
-		out.Reset()
 	}
 }
 
 func TestFail(t *testing.T) {
-	out := bytes.NewBuffer(nil)
 	var tests = []struct {
 		formula string
 	}{
@@ -77,8 +67,9 @@ func TestFail(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		err := calc(test.formula, out)
+		_, err := Calc(test.formula)
 		if err == nil {
+			fmt.Println(test.formula)
 			t.Errorf("Test FAIL failed: expected error")
 		}
 	}
