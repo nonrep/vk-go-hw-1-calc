@@ -1,16 +1,16 @@
 package stack
 
-type Stack struct {
-	items []rune
+type Stack[T any] struct {
+	items []T
 }
 
-func (s *Stack) Push(item rune) {
+func (s *Stack[T]) Push(item T) {
 	s.items = append(s.items, item)
 }
 
-func (s *Stack) Pop() (rune, bool) {
+func (s *Stack[T]) Pop() (T, bool) {
 	if s.IsEmpty() {
-		var zeroValue rune
+		var zeroValue T
 		return zeroValue, false
 	}
 	index := len(s.items) - 1
@@ -19,18 +19,18 @@ func (s *Stack) Pop() (rune, bool) {
 	return item, true
 }
 
-func (s *Stack) Peek() (rune, bool) {
+func (s *Stack[T]) Peek() (T, bool) {
 	if s.IsEmpty() {
-		var zeroValue rune
+		var zeroValue T
 		return zeroValue, false
 	}
 	return s.items[len(s.items)-1], true
 }
 
-func (s *Stack) IsEmpty() bool {
+func (s *Stack[T]) IsEmpty() bool {
 	return len(s.items) == 0
 }
 
-func (s *Stack) Size() int {
+func (s *Stack[T]) Size() int {
 	return len(s.items)
 }
