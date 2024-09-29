@@ -2,6 +2,7 @@ package calc
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -9,32 +10,37 @@ import (
 	"github.com/nonrep/go-homework-1-calc/stack"
 )
 
-const numberToken = 'N' // Функция tokenize преобразует формулу в набор токенов, где все числа заменяются токеном N.
-
-const plus = '+'
-const minus = '-'
-const multiplication = '*'
-const division = '/'
+const (
+	numberToken            = 'N' // Функция tokenize преобразует формулу в набор токенов, где все числа заменяются токеном N.
+	plusOperator           = '+'
+	minusOperator          = '-'
+	multiplicationOperator = '*'
+	divisionOperator       = '/'
+	openingParenthesis     = '('
+	closingParenthesis     = ')'
+	space                  = ' '
+	dot                    = '.'
+)
 
 var priority = map[rune]int{
-	'(': 0,
-	')': 1,
-	'+': 7,
-	'-': 7,
-	'/': 8,
-	'*': 8,
+	openingParenthesis:     0,
+	closingParenthesis:     1,
+	plusOperator:           7,
+	minusOperator:          7,
+	divisionOperator:       8,
+	multiplicationOperator: 8,
 }
 
 // operation выполняет арифметической операции.
 func operation(left, right float64, operation rune) (result float64, err error) {
 	switch operation {
-	case plus:
+	case plusOperator:
 		result = left + right
-	case minus:
+	case minusOperator:
 		result = left - right
-	case multiplication:
+	case multiplicationOperator:
 		result = left * right
-	case division:
+	case divisionOperator:
 		if right == 0 {
 			return result, errors.New("division by zero")
 		}
@@ -58,10 +64,10 @@ func isValidFormula(formula string) error {
 func addUnaryMinus(formula string) string {
 	var prev rune
 	for i, char := range formula {
-		if char == minus && (prev == 0 || prev == ' ' || prev == '(') {
+		if char == minusOperator && (prev == 0 || prev == space || prev == openingParenthesis) {
 			formula = formula[:i] + "0" + formula[i:] // Добавляем 0 перед унарным минусом.
 		}
-		if char != ' ' {
+		if char != space {
 			prev = char
 		}
 	}
@@ -75,7 +81,7 @@ func tokenize(formula string) (tokens []rune, numbers []float64, err error) {
 	for i := 0; i < len(formula); i++ {
 		char := rune(formula[i])
 
-		if unicode.IsDigit(char) || char == '.' {
+		if unicode.IsDigit(char) || char == dot {
 			numberString += string(char)
 		} else {
 			if numberString != "" {
@@ -88,7 +94,7 @@ func tokenize(formula string) (tokens []rune, numbers []float64, err error) {
 				numberString = ""
 			}
 
-			if char == plus || char == minus || char == multiplication || char == division || char == '(' || char == ')' {
+			if char == plusOperator || char == minusOperator || char == multiplicationOperator || char == divisionOperator || char == openingParenthesis || char == closingParenthesis {
 				tokens = append(tokens, char)
 			}
 		}
@@ -111,7 +117,6 @@ func tokenize(formula string) (tokens []rune, numbers []float64, err error) {
 
 // infixToPostfix определяет приоритет операций с помощью обратной польской записи, на выходе формула в виде слайса токенов в постфиксной записи.
 func infixToPostfix(tokens []rune) ([]rune, error) {
-
 	// В infix записи между операндами должен быть оператор.
 	if strings.Contains(string(tokens), "NN") {
 		return []rune{}, errors.New("the formula contains an invalid combination")
@@ -124,9 +129,9 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 	for _, token := range tokens {
 		if token == numberToken {
 			polishEntry = append(polishEntry, token)
-		} else if token == '(' {
+		} else if token == openingParenthesis {
 			stack.Push(token)
-		} else if token == ')' {
+		} else if token == closingParenthesis {
 			if stack.IsEmpty() {
 				return nil, errors.New("wrong combination of brackets")
 			}
@@ -135,7 +140,7 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 				if !exists {
 					return nil, errors.New("wrong combination of brackets")
 				}
-				if top == '(' {
+				if top == openingParenthesis {
 					stack.Pop()
 					break
 				}
@@ -161,7 +166,7 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 
 	for !stack.IsEmpty() {
 		last, _ := stack.Pop()
-		if last == '(' {
+		if last == openingParenthesis {
 			return nil, errors.New("wrong combination of brackets")
 		}
 		polishEntry = append(polishEntry, last)
@@ -176,37 +181,37 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 
 // calculatePostfix обрабатывает постфиксную формулу, на выходе посчитанный результат.
 func calculatePostfix(polishEntry []rune, numbers []float64) (float64, error) {
-	var stack []float64
+	var stack stack.Stack[float64] // Используется для хранения чисел в определенной последовательности перед выполнением арифметических операций.
 	numIndex := 0
-
 	for _, token := range polishEntry {
 		if token == numberToken {
 			if numIndex >= len(numbers) {
 				return 0, errors.New("invalid expression: not enough numbers")
 			}
-			stack = append(stack, numbers[numIndex])
+			stack.Push(numbers[numIndex])
 			numIndex++
 		} else {
-			if len(stack) < 2 {
+			right, _ := stack.Pop()
+			left, notEmpty := stack.Pop()
+			if !notEmpty {
 				return 0, errors.New("invalid expression: not enough values in stack")
 			}
-			right := stack[len(stack)-1]
-			left := stack[len(stack)-2]
-			stack = stack[:len(stack)-2]
 
 			result, err := operation(left, right, token)
 			if err != nil {
 				return 0, err
 			}
-			stack = append(stack, result)
+			stack.Push(result)
 		}
 	}
 
-	if len(stack) != 1 {
+	if stack.Size() != 1 {
 		return 0, errors.New("invalid expression: multiple values left in stack")
 	}
 
-	return stack[0], nil
+	resulst, _ := stack.Pop()
+
+	return resulst, nil
 }
 
 // Calc высчитывает значение формулы в формате строки, возвращает посчитанный результат.
@@ -226,5 +231,10 @@ func Calc(formula string) (float64, error) {
 		return 0, err
 	}
 
-	return calculatePostfix(polishEntry, numbers)
+	result, err := calculatePostfix(polishEntry, numbers)
+	if err != nil {
+		return 0, fmt.Errorf("calculate postfix: %v", err)
+	}
+
+	return result, nil
 }
