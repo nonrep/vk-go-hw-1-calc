@@ -134,11 +134,14 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 	stack := stack.New[rune]()
 
 	for _, token := range tokens {
-		if token == numberToken {
+		switch {
+		case token == numberToken:
 			polishEntry = append(polishEntry, token)
-		} else if token == openingBracket {
+
+		case token == openingBracket:
 			stack.Push(token)
-		} else if token == closingBracket {
+
+		case token == closingBracket:
 			if stack.IsEmpty() {
 				return nil, errBracketCombination
 			}
@@ -151,17 +154,24 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 					stack.Pop()
 					break
 				}
-				last, _ := stack.Pop()
+				last, isNotEmpty := stack.Pop()
+				if !isNotEmpty {
+					return nil, errInvalidFormula
+				}
 				polishEntry = append(polishEntry, last)
 			}
-		} else {
+
+		default:
 			for !stack.IsEmpty() {
 				top, exists := stack.Peek()
 				if !exists {
 					break
 				}
 				if priority[top] >= priority[token] {
-					last, _ := stack.Pop()
+					last, isNotEmpty := stack.Pop()
+					if !isNotEmpty {
+						return nil, errInvalidFormula
+					}
 					polishEntry = append(polishEntry, last)
 				} else {
 					break
@@ -172,7 +182,10 @@ func infixToPostfix(tokens []rune) ([]rune, error) {
 	}
 
 	for !stack.IsEmpty() {
-		last, _ := stack.Pop()
+		last, isNotEmpty := stack.Pop()
+		if !isNotEmpty {
+			return nil, errInvalidFormula
+		}
 		if last == openingBracket {
 			return nil, errBracketCombination
 		}
@@ -198,7 +211,10 @@ func calculatePostfix(polishEntry []rune, numbers []float64) (float64, error) {
 			stack.Push(numbers[numIndex])
 			numIndex++
 		} else {
-			right, _ := stack.Pop()
+			right, notEmpty := stack.Pop()
+			if !notEmpty {
+				return 0, errInvalidFormula
+			}
 			left, notEmpty := stack.Pop()
 			if !notEmpty {
 				return 0, errors.New("invalid expression: not enough values in stack")
@@ -216,7 +232,10 @@ func calculatePostfix(polishEntry []rune, numbers []float64) (float64, error) {
 		return 0, errors.New("invalid expression: multiple values left in stack")
 	}
 
-	resulst, _ := stack.Pop()
+	resulst, isNotEmpty := stack.Pop()
+	if !isNotEmpty {
+		return 0, errInvalidFormula
+	}
 
 	return resulst, nil
 }
